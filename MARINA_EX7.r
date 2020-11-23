@@ -1,6 +1,6 @@
 png("plot_ex7.png",width = 600)
 layout(matrix(c(1,2),2,1,byrow = T))
-dfFin <-  read.csv2("MARINA_DATA", stringsAsFactors = T)
+dfFin <-  read.csv2("MARINA_DATA.csv", stringsAsFactors = T)
 dfFin
 x <- c(dfFin$year_2005)
 y <- c(dfFin$year_2017)
