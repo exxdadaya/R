@@ -1,0 +1,701 @@
+---
+title: "Упражнение №5 Вариант 14"
+author: "Кориба Марина"
+date: "22 03 2021"
+output: html_document
+---
+
+## Вариант 14
+
+1 Оценить стандартную ошибку модели для линейных регрессионных моделей из упражнения 4 (варианты ниже): а) со всеми объясняющими переменными; б) только с непрерывными объясняющими переменными:
+
+ - методом проверочной выборки с долей обучающей 50%;
+
+ - методом LOOCV;
+
+ - k-кратной кросс-валидацией с k=5 и k=10.
+
+Выбрать лучшую модель по минимуму ошибки. Все ли методы кросс-валидации сходятся на одной и той же модели?
+
+
+2 Оценить стандартные ошибки параметров лучшей модели регрессии методом бутстрепа. Вывести график остатков лучшей модели. Сравнить с оценками стандартных ошибок параметров по МНК.
+
+
+```{r setup, include=FALSE}
+
+# загрузка пакетов
+library('ISLR')         # загружаем пакет
+library('GGally')       # графики совместного разброса переменных
+library('lmtest')       # тесты остатков регрессионных моделей
+library('FNN')          # алгоритм kNN
+library('boot')              # расчёт ошибки с кросс-валидацией
+
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#### Описание переменных
+
+Набор данных *Carseats* содержит переменные:
+
+*Sales* - Удельные продажи (в тысячах) в каждом месте
+
+*Price* - Цена, которую компания взимает за автокресла на каждом участке
+
+*Population* - Численность населения в регионе (в тысячах человек)
+
+*Urban* - Фактор с уровнями Нет и Да, указывающий, находится ли магазин в городе или сельской местности
+
+
+Размерность обучающей выборки: n = 400 строк, p = 2 объясняющих переменных. Зависимая переменная – *Sales*. Дискретная величина - *Urban*.
+
+
+### Метод перекрёстной проверки
+
+Рассмотрим данные с характеристиками города Carseats из пакета MASS. Скопируем таблицу во фрейм DF.Carseats для дальнейших манипуляций.
+
+
+```{r}
+
+my.seed <- 14
+
+DF.Carseats <- subset(Carseats, select = c(Sales, Price, Population, Urban))
+
+#DF.Carseats <- Carseats
+
+head(DF.Carseats)
+
+str(DF.Carseats) 
+
+```
+
+
+## Oписательные статистики по переменным
+
+```{r}
+
+summary(DF.Carseats)
+
+```
+
+В таблице данных 400 наблюдений и 3 переменных, среди которых есть непрерывные количественные и дискретные количественные и одна номинальная (name, название модели автомобиля, сохранено как фактор). В данном случае по функции summary() сложно определить реальные типы переменных, помогает table() от отдельных столбцов таблицы: если уникальных значений немного, перед нами фактор.
+
+
+#### Количество цилиндров
+
+```{r}
+
+table(DF.Carseats$Urban)
+
+```
+
+
+Построим графики разброса, показав факторы *Urban* (число цилиндров)  цветом. Зависимой переменной модели является *Sales*, её покажем в первой строке / столбце матричного графика. Во вторую строку / столбец поставим фактор.
+
+
+```{r}
+
+# переводим дискретные количественные переменные в факторы
+DF.Carseats$Urban <- as.factor(DF.Carseats$Urban)
+
+# графики разброса, цвет -- количество цилиндров
+ggpairs(DF.Carseats[, c(1, 2, 4)], ggplot2::aes(color = Urban))
+
+ggpairs(DF.Carseats[, c(1, 3, 4)], ggplot2::aes(color = Urban))
+
+```
+
+
+#### Графики зависимости  Sales ~ Price ,  Sales ~ Population, Sales ~ Urban
+```{r}
+
+plot(DF.Carseats$Price , DF.Carseats$Sales,
+     xlab = 'Price ', ylab = 'Sales', pch = 21,
+     col = rgb(0, 0, 1, alpha = 0.4), bg = rgb(0, 0, 1, alpha = 0.4))
+
+plot(DF.Carseats$Population, DF.Carseats$Sales,
+     xlab = 'Population', ylab = 'Sales', pch = 21,
+     col = rgb(0, 0, 1, alpha = 0.4), bg = rgb(0, 0, 1, alpha = 0.4))
+
+plot(DF.Carseats$Urban, DF.Carseats$Sales,
+     xlab = 'Urban', ylab = 'Sales', pch = 21,
+     col = rgb(0, 0, 1, alpha = 0.4), bg = rgb(0, 0, 1, alpha = 0.4))
+
+
+```
+
+
+## Метод проверочной выборки
+
+Он состоит в том, что мы отбираем одну тестовую выборку и будем считать на ней ошибку модели
+
+```{r}
+# общее число наблюдений
+n <- nrow(DF.Carseats)
+
+# доля обучающей выборки
+train.percent <- 0.5
+
+# выбрать наблюдения в обучающую выборку
+set.seed(my.seed)
+inTrain <- sample(1:n, n * train.percent)
+
+# фактические значения Y на тестовой выборке
+y.test.fact <- DF.Carseats$Sales[-inTrain]
+
+# рисуем разными цветами обучающую и тестовую
+plot(DF.Carseats$Price [inTrain], DF.Carseats$Sales[inTrain],
+     xlab = 'Price ', ylab = 'Sales', pch = 21,
+     col = rgb(0, 0, 1, alpha = 0.4), bg = rgb(0, 0, 1, alpha = 0.4))
+points(DF.Carseats$Price [-inTrain], DF.Carseats$Sales[-inTrain],
+       pch = 21, col = rgb(1, 0, 0, alpha = 0.4), 
+       bg = rgb(1, 0, 0, alpha = 0.4))
+legend('topright', 
+       pch = c(16, 16), col = c('blue', 'red'), legend = c('test', 'train'))
+
+plot(DF.Carseats$Population[inTrain], DF.Carseats$Sales[inTrain],
+     xlab = 'Population', ylab = 'Sales', pch = 21,
+     col = rgb(0, 0, 1, alpha = 0.4), bg = rgb(0, 0, 1, alpha = 0.4))
+points(DF.Carseats$Population[-inTrain], DF.Carseats$Sales[-inTrain],
+       pch = 21, col = rgb(1, 0, 0, alpha = 0.4), 
+       bg = rgb(1, 0, 0, alpha = 0.4))
+legend('topright', 
+       pch = c(16, 16), col = c('blue', 'red'), legend = c('test', 'train'))
+
+
+
+DF.Carseats$Выборка <- 1
+DF.Carseats$Выборка[inTrain] <- 2
+DF.Carseats$Выборка <- as.factor(DF.Carseats$Выборка)
+levels(DF.Carseats$Выборка) <- c('test','train')
+
+ggplot(
+  DF.Carseats, aes(x = Urban, y = Sales)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_jitter(aes(bg = Выборка),position = position_jitter(width = .1, height = 0),
+  pch = 21, col = rgb(0, 0, 1, alpha = 0.4)
+  )
+
+```
+Построим модели для проверки точности со всеми объясняющими переменными.
+
+
+Вид моделей:
+
+$$Sales=f(Price + Population + Urban)$$
+Линейная модель: 
+
+$$Sales=β_0+β_1⋅weihgt +β_2  Population + β_3 Urban$$
+
+
+
+```{r, warning=FALSE}
+
+# присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.1_1 <- lm(Sales ~ Price + Population + Urban, subset = inTrain)
+
+# подгонка линейной модели на обучающей выборке
+fit.lm.1_1 <- lm(Sales ~ Price + Population + Urban, 
+               subset = inTrain)
+
+# прогноз на тестовую
+y.test.lm.1_1 <- predict(fit.lm.1_1, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.1_1 <- mean((y.test.fact - y.test.lm.1_1)^2)
+
+# отсоединить таблицу с данными
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.1_1
+
+```
+
+
+Строим квадратичную модель: 
+
+$$Sales = β_0 + β_1Price  + β_2 Population + β_3Urban + β_4 Price ^2 + β_5 Population^2 + β_6 Urban^2$$
+
+
+```{r}
+
+# присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.2_1 <- lm(Sales ~ poly(Price , 2)  + poly(Population, 2) + Urban, subset = inTrain)
+
+# прогноз на тестовую
+y.test.lm.2_1 <- predict(fit.lm.2_1, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.2_1 <- round(mean((y.test.fact - y.test.lm.2_1)^2), 2)
+
+# отсоединить таблицу с данными
+
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.2_1
+
+```
+
+
+## Строим кубическую модель: 
+
+$$Sales=β_0+β_1Price + β_1Price  + β_2 Population +  β_3 Urban  
+
++ β_4 Population^2+ + β_5Price ^2 + β_6 Urban^2 + β_7⋅Price ^3 + β_8 Population^3 + β_9 Urban^3$$
+
+
+ Присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+
+
+```{r}
+
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.3_1 <- lm(Sales ~ poly(Price , 3) + poly(Population, 3) + Urban, 
+               subset = inTrain)
+
+# прогноз на тестовую
+y.test.lm.3_1 <- predict(fit.lm.3_1, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.3_1 <- round(mean((y.test.fact - y.test.lm.3_1)^2), 2)
+
+# отсоединить таблицу с данными
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.3_1
+
+```
+
+
+## Перекрёстная проверка по отдельным наблюдениям (LOOCV)
+
+Это самый затратный в вычислительном плане метод, но и самый надёжный в плане оценки ошибки вне выборки. Попробуем применить его к линейной модели.
+
+
+```{r}
+
+# подгонка линейной модели на обучающей выборке
+fit.glm_1 <- glm(Sales ~ Price + Population + Urban, data = DF.Carseats)
+
+# считаем LOOCV-ошибку
+cv.err_1 <- cv.glm(DF.Carseats, fit.glm_1)
+
+# результат: первое число -- по формуле LOOCV-ошибки,
+#  второе -- с поправкой на смещение
+cv.err_1$delta[1]
+
+```
+
+
+Теперь оценим точность полиномиальных моделей, меняя степень, в которой стоит регрессор.
+
+
+```{r}
+
+# вектор с LOOCV-ошибками
+cv.err.loocv_1 <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.loocv_1) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm_1 <- glm(Sales ~ poly(Price , i) + poly(Population, i) + Urban, data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.loocv_1[i] <- cv.glm(DF.Carseats, fit.glm_1)$delta[1]
+}
+
+# результат
+cv.err.loocv_1
+
+```
+
+
+
+
+
+
+Построим модели для проверки точности только c непрерывными переменными.
+
+Вид моделей:
+
+$$Sales=f(Price + Population)$$
+
+
+Линейная модель: 
+
+$$Sales=β_0+β_1⋅weihgt +β_2 Population$$
+
+
+
+```{r, warning=FALSE}
+
+# присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.1 <- lm(Sales ~ Price  + Population, subset = inTrain)
+
+# подгонка линейной модели на обучающей выборке
+fit.lm.1 <- lm(Sales ~ Price  + Population, 
+               subset = inTrain)
+# прогноз на тестовую
+y.test.lm.1 <- predict(fit.lm.1, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.1 <- mean((y.test.fact - y.test.lm.1)^2)
+
+# отсоединить таблицу с данными
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.1
+
+```
+
+
+Строим квадратичную модель: 
+
+$$Sales = β_0 + β_1Price  + β_2 Population + β_3Price ^2 + β_4Population^2$$
+
+
+```{r}
+
+# присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.2 <- lm(Sales ~ poly(Price , 2) + poly(Population, 2), subset = inTrain)
+
+# прогноз на тестовую
+y.test.lm.2 <- predict(fit.lm.2, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.2 <- round(mean((y.test.fact - y.test.lm.2)^2), 2)
+
+# отсоединить таблицу с данными
+
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.2
+
+```
+
+
+## Строим кубическую модель: 
+
+$$Sales=β_0 + β_1Price + β_2 Population  + 
+
++ β_3 Population^2 + + β_4Price ^2 + β_5⋅Price ^3 + β_6 Population^3$$
+
+
+ Присоединить таблицу с данными: названия стоблцов будут доступны напрямую
+
+
+```{r}
+
+attach(DF.Carseats)
+
+# подгонка модели на обучающей выборке
+fit.lm.3 <- lm(Sales ~ poly(Price , 3) + poly(Population, 3), 
+               subset = inTrain)
+
+# прогноз на тестовую
+y.test.lm.3 <- predict(fit.lm.3, DF.Carseats[-inTrain, ])
+
+# считаем MSE на тестовой выборке
+MSE.lm.3 <- round(mean((y.test.fact - y.test.lm.3)^2), 2)
+
+# отсоединить таблицу с данными
+detach(DF.Carseats)
+
+# смотрим ошибку
+MSE.lm.3
+
+```
+
+
+## Перекрёстная проверка по отдельным наблюдениям (LOOCV)
+
+Это самый затратный в вычислительном плане метод, но и самый надёжный в плане оценки ошибки вне выборки. Попробуем применить его к линейной модели.
+
+
+```{r}
+
+# подгонка линейной модели на обучающей выборке
+fit.glm <- glm(Sales ~ Price   + Population, data = DF.Carseats)
+
+# считаем LOOCV-ошибку
+cv.err <- cv.glm(DF.Carseats, fit.glm)
+
+# результат: первое число -- по формуле LOOCV-ошибки,
+#  второе -- с поправкой на смещение
+cv.err$delta[1]
+
+```
+
+
+Теперь оценим точность полиномиальных моделей, меняя степень, в которой стоит регрессор.
+
+
+```{r}
+
+# вектор с LOOCV-ошибками
+cv.err.loocv <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.loocv) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm <- glm(Sales ~ poly(Price , i) + poly(Population, i), data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.loocv[i] <- cv.glm(DF.Carseats, fit.glm)$delta[1]
+}
+
+# результат
+cv.err.loocv
+
+```
+
+
+## k-кратная перекрёстная проверка
+
+K-кратная кросс-валидация – компромисс между методом проверочной выборки и LOOCV. Оценка ошибки вне выборки ближе к правде, по сравнению с проверочной выборкой, а объём вычислений меньше, чем при LOOCV. Проведём 10-ти кратную и 5-ти кратную кросс-валидацию моделей разных степеней.
+
+# 5-ти кратная 
+
+```{r}
+
+
+# оценим точность полиномиальных моделей, меняя степень
+# вектор с ошибками по 5-ти кратной кросс-валидации
+cv.err.k.fold5 <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.k.fold5) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm <- glm(Sales ~ poly(Price , i) + poly(Population, i), data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.k.fold5[i] <- cv.glm(DF.Carseats, fit.glm, K = 5)$delta[1]
+}
+
+# результат
+cv.err.k.fold5
+
+```
+
+
+# 10-ти кратная
+
+```{r}
+
+# оценим точность полиномиальных моделей, меняя степень
+# вектор с ошибками по 10-кратной кросс-валидации
+cv.err.k.fold10 <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.k.fold10) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm <- glm(Sales ~ poly(Price , i) + poly(Population, i), data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.k.fold10[i] <- cv.glm(DF.Carseats, fit.glm, K = 10)$delta[1]
+}
+
+# результат
+cv.err.k.fold10
+
+```
+
+## для модели с фиктивной переменной
+
+# 5-ти кратная 
+
+
+```{r}
+
+
+# оценим точность полиномиальных моделей, меняя степень
+# вектор с ошибками по 5-ти кратной кросс-валидации
+cv.err.k.fold5_1 <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.k.fold5_1) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm_1 <- glm(Sales ~ poly(Price , i) + poly(Population, i) + Urban, data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.k.fold5_1[i] <- cv.glm(DF.Carseats, fit.glm_1, K = 5)$delta[1]
+}
+
+# результат
+cv.err.k.fold5_1
+
+```
+
+# 10-ти кратная
+
+```{r}
+
+# оценим точность полиномиальных моделей, меняя степень
+# вектор с ошибками по 10-кратной кросс-валидации
+cv.err.k.fold10_1 <- rep(0, 5)
+# имена элементов вектора
+names(cv.err.k.fold10_1) <- 1:5
+
+# цикл по степеням полиномов
+for (i in 1:5) {
+  # оценка модели
+  fit.glm_1 <- glm(Sales ~ poly(Price , i) + poly(Population, i) + Urban, data = DF.Carseats)
+  # расчёт ошибки
+  cv.err.k.fold10_1[i] <- cv.glm(DF.Carseats, fit.glm_1, K = 10)$delta[1]
+}
+
+# результат
+cv.err.k.fold10_1
+
+```
+
+Объединим все ошибки в одну таблицу и отсортируем её по возрастанию MSE (с непрерывными) и MSE.1 (со всеми обяняющими переменными):
+
+
+```{r}
+
+# записываем все ошибки в таблицу
+df.MSE <- data.frame(Модель = c('Линейная', 'Полином 2 степени',
+                                'Полином 3 степени', 
+                                rep(paste('Полином', 1:5, 'степени'), 3)), 
+                     Проверка.точности = c(rep('Проверочная выборка 50%', 3),
+                                           rep('LOOCV', 5), 
+                                           rep('Кросс-валидация, k = 5', 5),
+                                           rep('Кросс-валидация, k = 10', 5)),
+                     MSE = round(c(MSE.lm.1, MSE.lm.2, MSE.lm.3, 
+                                  cv.err.loocv, cv.err.k.fold10, cv.err.k.fold5), 2), 
+                     MSE = round(c(MSE.lm.1_1, MSE.lm.2_1, MSE.lm.3_1, 
+                                  cv.err.loocv_1, cv.err.k.fold10_1, cv.err.k.fold5_1), 2))
+
+# все модели по возрастанию ошибки
+df.MSE[order(df.MSE$MSE), ]
+
+```
+
+
+Опираясь на результаты расчётов с кросс-валидацией, можно заключить, что на самом деле ошибка вне выборки у линейной модели выше, чем показывала MSE на тестовой выборке. В целом, ошибка методом проверочной выборки размером 50% от числа наблюдений отличается от ошибки вычисленной кросс-валидацией на несколько сотых и занижает MSE и, следовательно, завышает точность моделей. Та же ситуация наблюдается и у моделей со всеми обяъсняющими переменными.
+
+
+# Бутстреп
+
+## Точность оценки параметра регрессии
+
+При построении модели регрессии проблемы в остатках приводят к неверной оценке ошибок параметров. Обойти эту проблему можно, применив для расчёта этих ошибок бутстреп.
+
+
+```{r}
+
+# Оценивание точности линейной регрессионной модели ----------------------------
+
+# оценить стандартные ошибки параметров модели 
+#  Sales = beta_0 + beta_1 * horsepower с помощью бутстрепа,
+#  сравнить с оценками ошибок по МНК
+
+# функция для расчёта коэффициентов ПЛР по выборке из данных
+boot.fn <- function(data, index){
+  coef(lm(Sales ~ Price  + Population, data = data, subset = index))
+}
+boot.fn(DF.Carseats, 1:n)
+
+```
+
+
+# применениe функции к бутстреп-выборке
+
+```{r}
+
+set.seed(my.seed)
+boot.fn(DF.Carseats, sample(n, n, replace = T))
+
+```
+
+
+применяем функцию boot для вычисления стандартных ошибок параметров
+
+```{r}
+ 
+#  (1000 выборок с повторами)
+boot(DF.Carseats, boot.fn, 1000)
+
+```
+
+
+ сравним с ошибками параметров по МНК
+
+```{r}
+# К
+summary(fit.lm.1)$coef
+summary(fit.lm.1_1)$coef
+
+```
+
+
+ график остатков модели
+
+```{r}
+ 
+plot(fit.lm.1, 3)
+plot(fit.lm.1_1, 3)
+
+```
+
+
+
+```{r}
+
+# вычислим оценки параметров квадратичной модели регрессии
+boot.fn.2 <- function(data, index){
+  coef(lm(Sales ~ poly(Price , 2)  +  poly(Population, 2), data = data, subset = index))
+}
+# применим функцию к 1000 бутсреп-выборкам
+set.seed(my.seed)
+boot(DF.Carseats, boot.fn.2, 1000)
+
+```
+
+сравним с ошибками параметров по МНК
+
+```{r}
+
+summary(fit.lm.2)$coef
+summary(fit.lm.2_1)$coef
+
+```
+
+
+график остатков модели
+
+```{r}
+
+plot(fit.lm.2, 3)
+plot(fit.lm.2_1, 3)
+
+```
+
+Нелинейность в остатках полинома третьей степени остаётся, и бутстреп-ошибки параметров модели выше, чем аналогичные МНК-оценки. 
+
+Мы сопоставили ошибки параметров, полученных с помощью МНК и бутстрепом заметим, что они достаточо близки, но не эдентичны.
