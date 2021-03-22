@@ -24,7 +24,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r, echo=FALSE}
 
 # константы
-my.seed <- 24
+my.seed <- 14
 train.percent <- 0.85
 
 # открываем данные
