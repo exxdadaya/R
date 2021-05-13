@@ -1,0 +1,284 @@
+---
+title: "Упражнение 8"
+author: "Кориба Марина"
+date: "10 05 2021"
+output: html_document
+---
+
+
+# Задание:
+
+Построить две модели для прогноза на основе дерева решений:
+
+ -  для непрерывной зависимой переменной;
+ -  для категориальной зависимой переменной.
+
+Данные и переменные указаны в таблице с вариантами.
+Ядро генератора случайных чисел – номер варианта.
+
+Для каждой модели:
+
+ -  Указать настроечные параметры метода из своего варианта (например: количество узлов, количество предикторов, скорость обучения).
+ -  Подогнать модель на обучающей выборке (50% наблюдений). Рассчитать MSE на тестовой выборке.
+ -  Перестроить модель с помощью метода, указанного в варианте.
+ -  Сделать прогноз по модели с подобранными в п.3 параметрами на тестовой выборке, оценить его точность и построить график «прогноз-реализация».
+
+# Вариант 14
+
+Модели: бэггинг (количество предикторов).
+Данные: 'Boston {MASS}'.
+
+```{r setup, include=FALSE}
+library('tree')              # деревья tree()
+library('GGally')            # матричный график разброса ggpairs()
+library('MASS')              # набор данных Boston
+library('randomForest')      # случайный лес randomForest()
+library('gbm')               # бустинг gbm()
+library('class')
+data(Boston)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r }
+# Название столбцов переменных
+names(Boston)
+
+# Размерность данных
+dim(Boston)
+
+# Ядро генератора случайных чисел
+my.seed <- 14
+
+```
+
+# Модель 1 (для непрерывной зависимой переменной crim)
+
+```{r}
+
+# ?Boston
+head(Boston)
+```
+
+```{r}
+# Матричные графики разброса переменных
+p <- ggpairs(Boston[, c(1, 2:5)])
+suppressMessages(print(p))
+
+p <- ggpairs(Boston[, c(1, 6:9)])
+suppressMessages(print(p))
+
+p <- ggpairs(Boston[, c(1, 10:14)])
+suppressMessages(print(p))
+```
+
+```{r}
+# Обучающая выборка
+set.seed(my.seed)
+# Обучающая выборка - 50%
+train <- sample(1:nrow(Boston), nrow(Boston)/2)
+```
+
+Построим дерево регрессии для зависимой переменной crim
+
+```{r}
+# Обучаем модель
+tree.boston <- tree(crim ~ ., Boston, subset = train)
+summary(tree.boston)
+```
+
+```{r}
+# Визуализация
+plot(tree.boston)
+text(tree.boston, pretty = 0)
+tree.boston                    # Посмотреть всё дерево в консоли
+```
+
+```{r}
+# Прогноз по модели 
+yhat <- predict(tree.boston, newdata = Boston[-train, ])
+boston.test <- Boston[-train, "crim"]
+
+# MSE на тестовой выборке
+mse.test <- mean((yhat - boston.test)^2)
+names(mse.test)[length(mse.test)] <- 'Boston.regr.tree.all'
+mse.test
+
+# Точность прогноза на тестовой выборке
+acc.test <- sum(abs(yhat-boston.test))/sum(boston.test)
+names(acc.test)[length(acc.test)] <- 'Boston.regr.tree.all'
+acc.test
+```
+
+# Бэггинг (модель 1)
+
+```{r}
+# бэггинг с 13 предикторами
+set.seed(my.seed)
+bag.boston <- randomForest(crim ~ ., data = Boston, subset = train, 
+                           mtry = 13, importance = TRUE)
+
+bag.boston
+```
+
+```{r}
+# прогноз
+yhat.bag = predict(bag.boston, newdata = Boston[-train, ])
+
+# MSE на тестовой
+mse.test <- c(mse.test, mean((yhat.bag - boston.test)^2))
+names(mse.test)[length(mse.test)] <- 'Boston.bag.model.1.13'
+mse.test
+
+# Точность прогноза на тестовой выборке
+acc.test <- sum(abs(yhat.bag-boston.test))/sum(boston.test)
+names(acc.test)[length(acc.test)] <- 'Boston.regr.tree.model.1.13'
+acc.test
+```
+
+Ошибка на тестовой выборке равна 24,45. Можно изменить число деревьев с помощью аргумента.
+
+```{r}
+# Бэггинг с 13 предикторами и 25 деревьями
+bag.boston <- randomForest(crim ~ ., data = Boston, subset = train,
+                           mtry = 13, ntree = 25)
+
+# прогноз
+yhat.bag <- predict(bag.boston, newdata = Boston[-train, ])
+
+# MSE на тестовой
+mse.test <- c(mse.test, mean((yhat.bag - boston.test)^2))
+names(mse.test)[length(mse.test)] <- 'Boston.bag.model.1.13.25'
+mse.test
+
+# Точность прогноза на тестовой выборке
+acc.test <- c(acc.test, sum(abs(yhat.bag-boston.test))/sum(boston.test))
+names(acc.test)[length(acc.test)] <- 'Boston.regr.tree.model.1.13.25'
+acc.test
+```
+
+```{r}
+# График прогноз - реализация
+plot(yhat.bag, boston.test)
+# линия идеального прогноза
+abline(0, 1)
+```
+Судя по полученным результатам наименьшая MSE наблюдается у модели с использованием бэггинга с 13 предикторами. Минимальная MSE на тестовой выборке равна 24,45, точность прогноза составила 0.51.
+
+# Модель 2 (для категориальной зависимой переменной high.medv)
+
+Загрузим таблицу с данными по расходу бензина, лошадиной силе и другая информации для автомобилей и добавим к ней переменную high.crim - миль на галлон:
+
+1, если миля на галлон >= 3.5;
+0 - в противном случае.
+
+```{r}
+# Новая переменная
+high.crim <- ifelse(Boston$crim < 3.5, '0', '1')
+high.crim <- factor(high.crim, labels = c('yes', 'no'))
+
+Boston$high.crim <- high.crim 
+
+# Название столбцов переменных
+names(Boston)
+# Размерность данных
+dim(Boston)
+```
+
+```{r}
+# Матричные графики разброса переменных
+p <- ggpairs(Boston[, c(15, 1:5)], aes(color = high.crim))
+suppressMessages(print(p))
+
+p <- ggpairs(Boston[, c(15, 6:10)], aes(color = high.crim))
+suppressMessages(print(p))
+
+p <- ggpairs(Boston[, c(15, 11:14)], aes(color = high.crim))
+suppressMessages(print(p))
+```
+
+Судя по графикам, класс 0 превосходит по размеру класс 1 по переменной high.crim приблизительно в 3 раза. 
+
+Построим дерево для категориального отклика high.crim, отбросив непрерывный отклик crim (мы оставили его на первом графике, чтобы проверить, как сработало разделение по значению crim = 3.5).
+
+```{r}
+# Модель бинарного  дерева
+tree.boston <- tree(high.crim ~ . -crim, Boston)
+summary(tree.boston)
+
+# График результата
+plot(tree.boston)                # Ветви
+text(tree.boston, pretty = 0)    # Подписи
+tree.boston                      # Посмотреть всё дерево в консоли
+```
+Теперь построим дерево на обучающей выборке и оценим ошибку на тестовой.
+
+```{r}
+# Тестовая выборка
+Boston.test <- Boston[-train,]
+high.crim.test <- high.crim[-train]
+
+# Строим дерево на обучающей выборке
+tree.boston <- tree(high.crim ~ . -crim, Boston, subset = train)
+
+# Делаем прогноз
+tree.pred <- predict(tree.boston, Boston.test, type = "class")
+
+# Матрица неточностей
+tbl <- table(tree.pred, high.crim.test)
+tbl
+# ACC на тестовой
+acc.test.2 <- sum(diag(tbl))/sum(tbl)
+names(acc.test.2)[length(acc.test.2)] <- 'Boston.class.tree.all.model.2'
+acc.test.2
+```
+Обобщённая характеристика точности: доля верных прогнозов: 0.99.
+
+
+# Бэггинг (модель 2)
+
+```{r}
+set.seed(my.seed)
+bag.boston <- randomForest(high.crim ~ . -crim, data = Boston, subset = train, 
+                           mtry = 13, importance = TRUE)
+# График и таблица относительной важности переменных
+summary(bag.boston)
+```
+
+```{r}
+# прогноз
+yhat.bag <-  predict(bag.boston, newdata = Boston[-train, ])
+
+# Матрица неточностей
+tbl <- table(yhat.bag, high.crim.test)
+tbl
+
+# Точность прогноза на тестовой выборке
+acc.test.2 <- c(acc.test.2, sum(diag(tbl))/sum(tbl))
+names(acc.test.2)[length(acc.test.2)] <- 'Boston.class.tree.model.2.13'
+acc.test.2
+```
+
+```{r}
+# бэггинг с 13 предикторами и 25 деревьями
+bag.boston <- randomForest(high.crim ~ .-crim, data = Boston, subset = train,
+                           mtry = 13, ntree = 25)
+
+# прогноз
+yhat.bag <- predict(bag.boston, newdata = Boston[-train, ])
+
+# Матрица неточностей
+tbl <- table(yhat.bag, high.crim.test)
+tbl
+# Точность прогноза на тестовой выборке
+acc.test.2 <- c(acc.test.2, sum(diag(tbl))/sum(tbl))
+names(acc.test.2)[length(acc.test.2)] <- 'Boston.class.tree.model.2.13.25'
+acc.test.2
+```
+
+```{r}
+# График "прогноз - реализация"
+plot(yhat.bag, Boston$high.crim[-train])
+```
+
+
